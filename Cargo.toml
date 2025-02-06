@@ -8,6 +8,7 @@ rust-version = "1.84"
 
 [dependencies]
 egui = "0.30"
+eframe = "0.20"
 serde = { version = "1", features = ["derive"] }
 egui_plot = "0.30.0"
 colorous = "1.0.15"
