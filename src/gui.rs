@@ -3,10 +3,13 @@
 // Will be filled in later with actual gui elements 
 // Called to in main 
 use eframe::{egui, App, NativeOptions, CreationContext};
+use egui_plot::{Line, Plot};
+use crate::sweep::SineWave;
 
 #[derive(Default)]
 pub struct MyApp {
     current_pane: Pane,
+    sine_wave: SineWave,
 }
 
 #[derive(PartialEq)]
@@ -59,6 +62,22 @@ impl App for MyApp {
                 Pane::Test => {
                     ui.heading("Test Pane");
                     ui.label("Sample Pane");
+
+                    ui.horizontal(|ui| {
+                        ui.label("Amplitude:");
+                        ui.add(egui::Slider::new(&mut self.sine_wave.amplitude, 0.0..=10.0));
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Phase:");
+                        ui.add(egui::Slider::new(&mut self.sine_wave.phase, 0.0..=2.0 * std::f64::consts::PI));
+                    });
+
+                    let points = self.sine_wave.generate_points();
+                    Plot::new("Sine Wave")
+                        .show(ui, |plot_ui| {
+                            plot_ui.line(Line::new(points));
+                        });
                 }
             }
         });
@@ -70,6 +89,13 @@ pub fn run_gui() {
     eframe::run_native(
         "Reading Rainbow",
         native_options,
-        Box::new(|_cc: &CreationContext| Box::new(MyApp::default())),
-    );
+        Box::new(|cc: &CreationContext| {
+            // Set up a minimal font configuration
+            let mut fonts = egui::FontDefinitions::default();
+            // fonts.font_data.clear(); // Remove this line to keep the default fonts
+            cc.egui_ctx.set_fonts(fonts);
+
+            Ok(Box::new(MyApp::default()))
+        }),
+    ).unwrap_or_else(|e| eprintln!("Failed to run native: {}", e));
 }
