@@ -15,6 +15,7 @@ pub struct SineWave {
 
 // Implimenting struct
 // Creating a SinWave struct with default amp and phase 
+#[allow(dead_code)]
 impl SineWave {
     pub fn new() -> Self {
         Self {
