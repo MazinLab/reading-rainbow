@@ -3,18 +3,23 @@
 // Will be filled in later with actual gui elements 
 // Called to in main 
 
-
 // Importing crates/modules
 use eframe::{egui, App, NativeOptions, CreationContext};
 use egui_plot::{Line, Plot}; // Gives functionality to see x,y when cursor hovers over plot 
 use crate::sweep::SineWave; // Importing sin wave struct from sweep.rs 
+use crate::logger::Logger;
+use crate::status::Status;
+use std::process::Command; // Importing Command for running shell commands
 
 // Defining structs 
 #[derive(Default)]
 pub struct MyApp {
     current_pane: Pane, // Keeps track of current pane
     sine_wave: SineWave, // Test sin wave structure 
-    // Fill this in later with more structs for other panes 
+    command_input: String, // Command line input
+    command_output: String, // Command line output
+    logger: Option<Logger>, // Data logger
+    status: Status, // Device status
 }
 
 // Defining different panes in the gui
@@ -24,7 +29,9 @@ enum Pane {
     Readout,
     Pump,
     Test,
-    // Change these later with actual panes 
+    Command, // New pane for command line
+    DataLogging,
+    Status,
 }
 
 impl Default for Pane {
@@ -50,6 +57,15 @@ impl App for MyApp {
             }
             if ui.button("Test Pane").clicked() {
                 self.current_pane = Pane::Test;
+            }
+            if ui.button("Command Line").clicked() {
+                self.current_pane = Pane::Command;
+            }
+            if ui.button("Data Logging").clicked() {
+                self.current_pane = Pane::DataLogging;
+            }
+            if ui.button("Status").clicked() {
+                self.current_pane = Pane::Status;
             }
         });
 
@@ -95,11 +111,73 @@ impl App for MyApp {
                             plot_ui.line(Line::new(points));
                         });
                 }
+
+                // Command line pane
+                Pane::Command => {
+                    ui.heading("Command Line");
+
+                    // Text input for command
+                    ui.horizontal(|ui| {
+                        ui.label("Command:");
+                        ui.text_edit_singleline(&mut self.command_input);
+                        if ui.button("Run").clicked() {
+                            self.command_output = run_command(&self.command_input);
+                        }
+                    });
+
+                    // Display command output
+                    ui.label("Output:");
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.command_output)
+                            .desired_width(f32::INFINITY) // Make the output box fill the pane width
+                            .desired_rows(10), // Number of output rows (can adjust)
+                    );
+                }
+
+                // Data logging pane
+                Pane::DataLogging => {
+                    ui.heading("Data Logging");
+
+                    if ui.button("Start Logging").clicked() {
+                        self.logger = Some(Logger::new("log.txt").expect("Failed to create log file"));
+                    }
+                    if ui.button("Stop Logging").clicked() {
+                        self.logger = None;
+                    }
+
+                    if let Some(logger) = &mut self.logger {
+                        logger.log("Sample data").expect("Failed to log data");
+                        ui.label("Logging data...");
+                    } else {
+                        ui.label("Logging stopped.");
+                    }
+                }
+
+                // Status pane
+                Pane::Status => {
+                    ui.heading("Status");
+                    ui.label(&self.status.status_message);
+                }
             }
         });
     }
 }
 
+// Function to run a command and return the output
+// This will be implimented into the command line pane
+fn run_command(command: &str) -> String {
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .output()
+        .expect("Failed to execute command");
+
+    if output.status.success() {
+        String::from_utf8_lossy(&output.stdout).to_string()
+    } else {
+        String::from_utf8_lossy(&output.stderr).to_string()
+    }
+}
 
 // Outputting the gui 
 pub fn run_gui() {
@@ -108,11 +186,18 @@ pub fn run_gui() {
         "Reading Rainbow",
         native_options,
         Box::new(|cc: &CreationContext| {
-            let mut fonts = egui::FontDefinitions::default(); // Mininal fonts (don't delete )
+            let fonts = egui::FontDefinitions::default(); // Mininal fonts (don't delete )
             // fonts.font_data.clear(); // Uncomment to remove default fonts (you need to upload a customf font file)
             cc.egui_ctx.set_fonts(fonts);
 
-            Ok(Box::new(MyApp::default())) // Don't remove 
+            Ok(Box::new(MyApp {
+                current_pane: Pane::Settings,
+                sine_wave: SineWave::default(),
+                command_input: String::new(),
+                command_output: String::new(),
+                logger: None,
+                status: Status::new(),
+            })) // Don't remove 
         }),
     ).unwrap_or_else(|e| eprintln!("Failed to run native: {}", e));
 }
