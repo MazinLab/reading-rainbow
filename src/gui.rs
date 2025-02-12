@@ -135,14 +135,17 @@ impl App for MyApp {
                 }
 
                 // Data logging pane
+                // Will create a file log.txt to save logged data 
                 Pane::DataLogging => {
                     ui.heading("Data Logging");
 
                     if ui.button("Start Logging").clicked() {
                         self.logger = Some(Logger::new("log.txt").expect("Failed to create log file"));
+                        self.status.update("Logging started");
                     }
                     if ui.button("Stop Logging").clicked() {
                         self.logger = None;
+                        self.status.update("Logging stopped");
                     }
 
                     if let Some(logger) = &mut self.logger {
