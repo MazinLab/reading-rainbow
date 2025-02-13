@@ -1,30 +1,35 @@
 // Nikki Zivkov 02/06/2025
-// This script generates a template for the gui 
-// Will be filled in later with actual gui elements 
-// Called to in main 
+// This script generates a template for the gui
+// Will be filled in later with actual gui elements
+// Called to in main
 
 // Importing crates/modules
-use eframe::{egui, App, NativeOptions, CreationContext};
-use egui_plot::{Line, Plot}; // Gives functionality to see x,y when cursor hovers over plot 
-use crate::sweep::SineWave; // Importing sin wave struct from sweep.rs 
 use crate::logger::Logger;
 use crate::status::Status;
+use crate::sweep::SineWave; // Importing sin wave struct from sweep.rs
+use crate::worker::{RPCCommand, RPCResponse};
+use eframe::{egui, App, CreationContext, NativeOptions};
+use egui_plot::{Line, Plot}; // Gives functionality to see x,y when cursor hovers over plot
 use std::process::Command; // Importing Command for running shell commands
+use std::sync::mpsc::{Receiver, Sender};
 
-// Defining structs 
-#[derive(Default)]
+// Defining structs
 pub struct MyApp {
-    current_pane: Pane, // Keeps track of current pane
-    sine_wave: SineWave, // Test sin wave structure 
-    command_input: String, // Command line input
+    current_pane: Pane,     // Keeps track of current pane
+    sine_wave: SineWave,    // Test sin wave structure
+    command_input: String,  // Command line input
     command_output: String, // Command line output
     logger: Option<Logger>, // Data logger
-    status: Status, // Device status
+    status: Status,         // Device status
+    settings: Settings,
+    command: Sender<RPCCommand>,
+    response: Receiver<RPCResponse>,
 }
 
 // Defining different panes in the gui
-#[derive(PartialEq)]
+#[derive(PartialEq, Default)]
 enum Pane {
+    #[default]
     Settings,
     Readout,
     Pump,
@@ -34,15 +39,24 @@ enum Pane {
     Status,
 }
 
-impl Default for Pane {
-    fn default() -> Self {
-        Pane::Settings
-    }
+#[derive(Default)]
+struct Settings {
+    fft_scale: Option<u16>,
 }
 
 // Defining each gui pane/clickable functionality
 impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Ok(c) = self.response.try_recv() {
+            match c {
+                RPCResponse::FFTScale(i) => {
+                    self.settings.fft_scale = i;
+                }
+                RPCResponse::Connected => {
+                    self.status.update("Connected");
+                }
+            }
+        }
         egui::SidePanel::left("side_panel").show(ctx, |ui| {
             ui.heading("Menu");
 
@@ -74,7 +88,18 @@ impl App for MyApp {
             match self.current_pane {
                 Pane::Settings => {
                     ui.heading("Settings");
-                    ui.label("More info to come");
+                    match self.settings.fft_scale {
+                        Some(mut scale) => {
+                            let widget = egui::widgets::DragValue::new(&mut scale)
+                                .range(0..=0xfff)
+                                .hexadecimal(3, false, true)
+                                .clamp_existing_to_range(true);
+                            if ui.add(widget).changed() {
+                                self.command.send(RPCCommand::SetFFTScale(scale)).unwrap()
+                            }
+                        }
+                        None => self.command.send(RPCCommand::GetFFTScale).unwrap(),
+                    }
                 }
                 Pane::Readout => {
                     ui.heading("Readout");
@@ -88,28 +113,29 @@ impl App for MyApp {
                     ui.heading("Test Pane");
                     ui.label("Sample Pane");
 
-                    // Adding sliders to the test pane where we have sin wave 
-                    // egui_plot crate has built in functionality to print out x,y when cursor hovers 
+                    // Adding sliders to the test pane where we have sin wave
+                    // egui_plot crate has built in functionality to print out x,y when cursor hovers
 
-                    
-                    // Specify that we are adjusting amplitude 
+                    // Specify that we are adjusting amplitude
                     ui.horizontal(|ui| {
                         ui.label("Amplitude:");
                         ui.add(egui::Slider::new(&mut self.sine_wave.amplitude, 0.0..=10.0));
                     });
 
-                    // Specify that we are adjusting phase 
+                    // Specify that we are adjusting phase
                     ui.horizontal(|ui| {
                         ui.label("Phase:");
-                        ui.add(egui::Slider::new(&mut self.sine_wave.phase, 0.0..=2.0 * std::f64::consts::PI));
+                        ui.add(egui::Slider::new(
+                            &mut self.sine_wave.phase,
+                            0.0..=2.0 * std::f64::consts::PI,
+                        ));
                     });
 
-                    // Plot the sin wave for each adjustment 
+                    // Plot the sin wave for each adjustment
                     let points = self.sine_wave.generate_points();
-                    Plot::new("Sine Wave")
-                        .show(ui, |plot_ui| {
-                            plot_ui.line(Line::new(points));
-                        });
+                    Plot::new("Sine Wave").show(ui, |plot_ui| {
+                        plot_ui.line(Line::new(points));
+                    });
                 }
 
                 // Command line pane
@@ -135,12 +161,13 @@ impl App for MyApp {
                 }
 
                 // Data logging pane
-                // Will create a file log.txt to save logged data 
+                // Will create a file log.txt to save logged data
                 Pane::DataLogging => {
                     ui.heading("Data Logging");
 
                     if ui.button("Start Logging").clicked() {
-                        self.logger = Some(Logger::new("log.txt").expect("Failed to create log file"));
+                        self.logger =
+                            Some(Logger::new("log.txt").expect("Failed to create log file"));
                         self.status.update("Logging started");
                     }
                     if ui.button("Stop Logging").clicked() {
@@ -182,15 +209,15 @@ fn run_command(command: &str) -> String {
     }
 }
 
-// Outputting the gui 
-pub fn run_gui() {
+// Outputting the gui
+pub fn run_gui(command: Sender<RPCCommand>, response: Receiver<RPCResponse>) {
     let native_options = NativeOptions::default();
     eframe::run_native(
         "Reading Rainbow",
         native_options,
         Box::new(|cc: &CreationContext| {
             let fonts = egui::FontDefinitions::default(); // Mininal fonts (don't delete )
-            // fonts.font_data.clear(); // Uncomment to remove default fonts (you need to upload a customf font file)
+                                                          // fonts.font_data.clear(); // Uncomment to remove default fonts (you need to upload a customf font file)
             cc.egui_ctx.set_fonts(fonts);
 
             Ok(Box::new(MyApp {
@@ -200,7 +227,11 @@ pub fn run_gui() {
                 command_output: String::new(),
                 logger: None,
                 status: Status::new(),
-            })) // Don't remove 
+                settings: Settings::default(),
+                command,
+                response,
+            })) // Don't remove
         }),
-    ).unwrap_or_else(|e| eprintln!("Failed to run native: {}", e));
+    )
+    .unwrap_or_else(|e| eprintln!("Failed to run native: {}", e));
 }
