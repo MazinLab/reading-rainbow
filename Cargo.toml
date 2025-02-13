@@ -19,6 +19,12 @@ num-complex = "0.4.6"
 capnp = "0.20.3"
 capnp_conv = "0.3.2"
 capnp_conv_macros = "0.3.2"
+gen3_rpc = { git = "https://github.com/MazinLab/gen3_rpc", version = "0.1.0" }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+num = "0.4.3"
+capnp-rpc = "0.20.3"  # Corrected name
+tokio-util = "0.7.13"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
