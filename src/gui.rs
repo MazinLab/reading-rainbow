@@ -24,6 +24,7 @@ pub struct MyApp {
     settings: Settings,
     command: Sender<RPCCommand>,
     response: Receiver<RPCResponse>,
+    error_message: Option<String>, // Add a field for the error message
 }
 
 // Defining different panes in the gui
@@ -37,11 +38,12 @@ enum Pane {
     Command, // New pane for command line
     DataLogging,
     Status,
+    DSPScale, // New pane for DSP scale adjustment
 }
 
 #[derive(Default)]
 struct Settings {
-    fft_scale: Option<u16>,
+    fft_scale: String, // Use String to handle text input
 }
 
 // Defining each gui pane/clickable functionality
@@ -49,9 +51,11 @@ impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Ok(c) = self.response.try_recv() {
             match c {
+                // Update the FFT scale in the settings
                 RPCResponse::FFTScale(i) => {
-                    self.settings.fft_scale = i;
+                    self.settings.fft_scale = i.map_or_else(|| "0".to_string(), |v| v.to_string());
                 }
+                // Update the connection status
                 RPCResponse::Connected => {
                     self.status.update("Connected");
                 }
@@ -81,6 +85,9 @@ impl App for MyApp {
             if ui.button("Status").clicked() {
                 self.current_pane = Pane::Status;
             }
+            if ui.button("DSP Scale Adjustment").clicked() {
+                self.current_pane = Pane::DSPScale;
+            }
         });
 
         // Showing the central pane selected
@@ -88,17 +95,15 @@ impl App for MyApp {
             match self.current_pane {
                 Pane::Settings => {
                     ui.heading("Settings");
-                    match self.settings.fft_scale {
-                        Some(mut scale) => {
+                    match self.settings.fft_scale.parse::<u16>() {
+                        Ok(mut scale) => {
                             let widget = egui::widgets::DragValue::new(&mut scale)
-                                .range(0..=0xfff)
-                                .hexadecimal(3, false, true)
-                                .clamp_existing_to_range(true);
+                                .clamp_range(0..=4095); // Adjust the range as needed
                             if ui.add(widget).changed() {
                                 self.command.send(RPCCommand::SetFFTScale(scale)).unwrap()
                             }
                         }
-                        None => self.command.send(RPCCommand::GetFFTScale).unwrap(),
+                        Err(_) => self.command.send(RPCCommand::GetFFTScale).unwrap(),
                     }
                 }
                 Pane::Readout => {
@@ -188,13 +193,52 @@ impl App for MyApp {
                     ui.heading("Status");
                     ui.label(&self.status.status_message);
                 }
+
+                // DSP Scale Adjustment pane
+                Pane::DSPScale => {
+                    ui.heading("DSP Scale Adjustment");
+
+                    // Text input for adjusting scale
+                    ui.horizontal(|ui| {
+                        ui.label("Scale:");
+                        ui.text_edit_singleline(&mut self.settings.fft_scale);
+                    });
+
+                    // Display valid range and example values
+                    ui.label("Valid values: 4095, 3967, 1919, 1911, 1879, 1877, 1365, 1301, 277, 273, 257, 1, 0");
+
+                    // Button to apply scale
+                    if ui.button("Apply Scale").clicked() {
+                        let valid_values = vec![4095, 3967, 1919, 1911, 1879, 1877, 1365, 1301, 277, 273, 257, 1, 0];
+                        if let Ok(scale_value) = self.settings.fft_scale.parse::<u16>() {
+                            // Only pass the value to the worker.rs if it is within the accepted values
+                            if valid_values.contains(&scale_value) {
+                                if let Err(e) = set_scale(&self.command, scale_value) {
+                                    self.error_message = Some(format!("Failed to set scale: {}", e));
+                                } else {
+                                    self.error_message = None; // Clear the error message on success
+                                }
+                            } else {
+                                // Display an error message if the value is not valid
+                                self.error_message = Some("Invalid scale value. Please enter one of the valid values.".to_string());
+                            }
+                        } else {
+                            // Display an error message if the value is not a valid number
+                            self.error_message = Some("Invalid scale value. Please enter one of the valid values.".to_string());
+                        }
+                    }
+
+                    // Display the error message if it exists
+                    if let Some(ref error_message) = self.error_message {
+                        ui.label(error_message);
+                    }
+                }
             }
         });
     }
 }
 
 // Function to run a command and return the output
-// This will be implimented into the command line pane
 fn run_command(command: &str) -> String {
     let output = Command::new("sh")
         .arg("-c")
@@ -209,6 +253,13 @@ fn run_command(command: &str) -> String {
     }
 }
 
+// Function to set the scale value
+fn set_scale(tx: &Sender<RPCCommand>, scale: u16) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Setting scale to: {}", scale);
+    tx.send(RPCCommand::SetFFTScale(scale))?;
+    Ok(())
+}
+
 // Outputting the gui
 pub fn run_gui(command: Sender<RPCCommand>, response: Receiver<RPCResponse>) {
     let native_options = NativeOptions::default();
@@ -216,8 +267,8 @@ pub fn run_gui(command: Sender<RPCCommand>, response: Receiver<RPCResponse>) {
         "Reading Rainbow",
         native_options,
         Box::new(|cc: &CreationContext| {
-            let fonts = egui::FontDefinitions::default(); // Mininal fonts (don't delete )
-                                                          // fonts.font_data.clear(); // Uncomment to remove default fonts (you need to upload a customf font file)
+            let fonts = egui::FontDefinitions::default(); // Minimal fonts (don't delete)
+            // fonts.font_data.clear(); // Uncomment to remove default fonts (you need to upload a custom font file)
             cc.egui_ctx.set_fonts(fonts);
 
             Ok(Box::new(MyApp {
@@ -230,6 +281,7 @@ pub fn run_gui(command: Sender<RPCCommand>, response: Receiver<RPCResponse>) {
                 settings: Settings::default(),
                 command,
                 response,
+                error_message: None, // Initialize the error message as None
             })) // Don't remove
         }),
     )

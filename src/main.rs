@@ -9,13 +9,13 @@ use std::thread;
 use worker::worker_thread;
 
 fn main() {
-    let (cmd_sender, cmd_reciever) = channel();
-    let (rsp_sender, rsp_reciever) = channel();
+    let (cmd_sender, cmd_receiver) = channel();
+    let (rsp_sender, rsp_receiver) = channel();
     let worker = thread::spawn(move || {
-        worker_thread(cmd_reciever, rsp_sender).unwrap();
+        worker_thread(cmd_receiver, rsp_sender).unwrap();
     });
 
-    gui::run_gui(cmd_sender, rsp_reciever);
+    gui::run_gui(cmd_sender, rsp_receiver);
 
     worker.join().unwrap();
 }

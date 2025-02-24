@@ -1,6 +1,7 @@
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use futures::AsyncReadExt;
-use gen3_rpc::DSPScaleError;
+use gen3_rpc::{DDCChannelConfig, DSPScaleError};
+use num::Complex;
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
     sync::mpsc::{Receiver, Sender},
@@ -8,11 +9,13 @@ use std::{
 
 use tokio::runtime::Runtime;
 
+// Define RPC commands for setting and getting the FFT scale
 pub enum RPCCommand {
     SetFFTScale(u16),
     GetFFTScale,
 }
 
+// Define RPC responses for connection status and FFT scale
 pub enum RPCResponse {
     Connected,
     FFTScale(Option<u16>),
@@ -49,14 +52,16 @@ pub fn worker_thread(
                     client: rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server),
                 };
 
+                // Send a connected response to the GUI
                 response.send(RPCResponse::Connected).unwrap();
 
                 tokio::task::spawn_local(rpc_system);
 
-                let mut _dactable = board.get_dac_table().await?;
+                // Get the DSP scale from the board
                 let mut dsp_scale = board.get_dsp_scale().await?;
                 loop {
                     match command.recv().unwrap() {
+                        // Handle the SetFFTScale command
                         RPCCommand::SetFFTScale(i) => {
                             let r = dsp_scale.set_fft_scale(i).await;
                             match r {
@@ -67,6 +72,7 @@ pub fn worker_thread(
                                 Err(_) => response.send(RPCResponse::FFTScale(None)).unwrap(),
                             }
                         }
+                        // Handle the GetFFTScale command
                         RPCCommand::GetFFTScale => {
                             let r = dsp_scale.get_fft_scale().await;
                             response.send(RPCResponse::FFTScale(r.ok())).unwrap()
