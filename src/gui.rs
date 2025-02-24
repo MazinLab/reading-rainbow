@@ -6,17 +6,14 @@
 // Importing crates/modules
 use crate::logger::Logger;
 use crate::status::Status;
-use crate::sweep::SineWave; // Importing sin wave struct from sweep.rs
 use crate::worker::{RPCCommand, RPCResponse};
 use eframe::{egui, App, CreationContext, NativeOptions};
-use egui_plot::{Line, Plot}; // Gives functionality to see x,y when cursor hovers over plot
 use std::process::Command; // Importing Command for running shell commands
 use std::sync::mpsc::{Receiver, Sender};
 
 // Defining structs
 pub struct MyApp {
     current_pane: Pane,     // Keeps track of current pane
-    sine_wave: SineWave,    // Test sin wave structure
     command_input: String,  // Command line input
     command_output: String, // Command line output
     logger: Option<Logger>, // Data logger
@@ -32,9 +29,6 @@ pub struct MyApp {
 enum Pane {
     #[default]
     Settings,
-    Readout,
-    Pump,
-    Test,
     Command, // New pane for command line
     DataLogging,
     Status,
@@ -67,15 +61,6 @@ impl App for MyApp {
             if ui.button("Settings").clicked() {
                 self.current_pane = Pane::Settings;
             }
-            if ui.button("Readout").clicked() {
-                self.current_pane = Pane::Readout;
-            }
-            if ui.button("Pump Tone Generation").clicked() {
-                self.current_pane = Pane::Pump;
-            }
-            if ui.button("Test Pane").clicked() {
-                self.current_pane = Pane::Test;
-            }
             if ui.button("Command Line").clicked() {
                 self.current_pane = Pane::Command;
             }
@@ -95,55 +80,8 @@ impl App for MyApp {
             match self.current_pane {
                 Pane::Settings => {
                     ui.heading("Settings");
-                    match self.settings.fft_scale.parse::<u16>() {
-                        Ok(mut scale) => {
-                            let widget = egui::widgets::DragValue::new(&mut scale)
-                                .clamp_range(0..=4095); // Adjust the range as needed
-                            if ui.add(widget).changed() {
-                                self.command.send(RPCCommand::SetFFTScale(scale)).unwrap()
-                            }
-                        }
-                        Err(_) => self.command.send(RPCCommand::GetFFTScale).unwrap(),
-                    }
+                    // Leave the Settings pane blank
                 }
-                Pane::Readout => {
-                    ui.heading("Readout");
-                    ui.label("Fill this in later");
-                }
-                Pane::Pump => {
-                    ui.heading("Pump Tone Generation");
-                    ui.label("Fridge Stuff ");
-                }
-                Pane::Test => {
-                    ui.heading("Test Pane");
-                    ui.label("Sample Pane");
-
-                    // Adding sliders to the test pane where we have sin wave
-                    // egui_plot crate has built in functionality to print out x,y when cursor hovers
-
-                    // Specify that we are adjusting amplitude
-                    ui.horizontal(|ui| {
-                        ui.label("Amplitude:");
-                        ui.add(egui::Slider::new(&mut self.sine_wave.amplitude, 0.0..=10.0));
-                    });
-
-                    // Specify that we are adjusting phase
-                    ui.horizontal(|ui| {
-                        ui.label("Phase:");
-                        ui.add(egui::Slider::new(
-                            &mut self.sine_wave.phase,
-                            0.0..=2.0 * std::f64::consts::PI,
-                        ));
-                    });
-
-                    // Plot the sin wave for each adjustment
-                    let points = self.sine_wave.generate_points();
-                    Plot::new("Sine Wave").show(ui, |plot_ui| {
-                        plot_ui.line(Line::new(points));
-                    });
-                }
-
-                // Command line pane
                 Pane::Command => {
                     ui.heading("Command Line");
 
@@ -164,9 +102,6 @@ impl App for MyApp {
                             .desired_rows(10), // Number of output rows (can adjust)
                     );
                 }
-
-                // Data logging pane
-                // Will create a file log.txt to save logged data
                 Pane::DataLogging => {
                     ui.heading("Data Logging");
 
@@ -187,14 +122,10 @@ impl App for MyApp {
                         ui.label("Logging stopped.");
                     }
                 }
-
-                // Status pane
                 Pane::Status => {
                     ui.heading("Status");
                     ui.label(&self.status.status_message);
                 }
-
-                // DSP Scale Adjustment pane
                 Pane::DSPScale => {
                     ui.heading("DSP Scale Adjustment");
 
@@ -273,7 +204,6 @@ pub fn run_gui(command: Sender<RPCCommand>, response: Receiver<RPCResponse>) {
 
             Ok(Box::new(MyApp {
                 current_pane: Pane::Settings,
-                sine_wave: SineWave::default(),
                 command_input: String::new(),
                 command_output: String::new(),
                 logger: None,

@@ -1,7 +1,6 @@
 mod gui;
 mod logger;
 mod status;
-mod sweep;
 mod worker;
 
 use std::sync::mpsc::channel;
