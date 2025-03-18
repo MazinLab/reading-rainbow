@@ -19,7 +19,7 @@ num-complex = "0.4.6"
 capnp = "0.20.3"
 capnp_conv = "0.3.2"
 capnp_conv_macros = "0.3.2"
-gen3_rpc = { git = "https://github.com/MazinLab/gen3_rpc", version = "0.1.0" }
+gen3_rpc = { git = "https://github.com/MazinLab/gen3_rpc", branch="main" }
 tokio = { version = "1", features = ["full", "macros", "net", "rt"] }
 futures = "0.3"
 num = "0.4.3"
