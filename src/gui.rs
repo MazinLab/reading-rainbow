@@ -8,8 +8,11 @@ use crate::logger::Logger;
 use crate::status::Status;
 use crate::worker::{RPCCommand, RPCResponse};
 use eframe::{egui, App, CreationContext, NativeOptions};
+use num::Complex;
 use std::process::Command; // Importing Command for running shell commands
 use std::sync::mpsc::{Receiver, Sender};
+use gen3_rpc::{Hertz, Attens}; // Importing Hertz and Attens for IF board
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
 
 // Defining structs
 pub struct MyApp {
@@ -22,6 +25,10 @@ pub struct MyApp {
     command: Sender<RPCCommand>,
     response: Receiver<RPCResponse>,
     error_message: Option<String>, // Add a field for the error message
+    dac_table: Option<Box<[Complex<i16>; 524288]>>, // Add a field for the DAC table
+    if_freq: Option<Hertz>, // Add a field for the IF frequency
+    if_attens: Option<Attens>, // Add a field for the IF attenuations
+    connection_time: Option<SystemTime>, // Add a field for the connection timestamp
 }
 
 // Defining different panes in the gui
@@ -33,11 +40,16 @@ enum Pane {
     DataLogging,
     Status,
     DSPScale, // New pane for DSP scale adjustment
+    DACTable, // New pane for DAC table operations
+    IFBoard, // New pane for IF board operations
 }
 
 #[derive(Default)]
 struct Settings {
     fft_scale: String, // Use String to handle text input
+    if_freq: String, // Use String to handle IF frequency input
+    if_input_atten: String, // Use String to handle IF input attenuation
+    if_output_atten: String, // Use String to handle IF output attenuation
 }
 
 // Defining each gui pane/clickable functionality
@@ -49,9 +61,22 @@ impl App for MyApp {
                 RPCResponse::FFTScale(i) => {
                     self.settings.fft_scale = i.map_or_else(|| "0".to_string(), |v| v.to_string());
                 }
+                // Update the DAC table
+                RPCResponse::DACTable(d) => {
+                    self.dac_table = d;
+                }
+                // Update the IF frequency
+                RPCResponse::IFFreq(f) => {
+                    self.if_freq = f;
+                }
+                // Update the IF attenuations
+                RPCResponse::IFAttens(a) => {
+                    self.if_attens = a;
+                }
                 // Update the connection status
-                RPCResponse::Connected => {
+                RPCResponse::Connected(time) => {
                     self.status.update("Connected");
+                    self.connection_time = Some(time);
                 }
             }
         }
@@ -73,6 +98,12 @@ impl App for MyApp {
             if ui.button("DSP Scale Adjustment").clicked() {
                 self.current_pane = Pane::DSPScale;
             }
+            if ui.button("DAC Table").clicked() {
+                self.current_pane = Pane::DACTable;
+            }
+            if ui.button("IF Board").clicked() {
+                self.current_pane = Pane::IFBoard;
+            }
         });
 
         // Showing the central pane selected
@@ -80,7 +111,15 @@ impl App for MyApp {
             match self.current_pane {
                 Pane::Settings => {
                     ui.heading("Settings");
-                    // Leave the Settings pane blank
+
+                    // Display connection status and timestamp
+                    if let Some(connection_time) = self.connection_time {
+                        let duration = connection_time.elapsed().unwrap_or(Duration::new(0, 0));
+                        ui.label(format!("Successfully connected to server"));
+                        ui.label(format!("Connection duration: {:.2?}", duration));
+                    } else {
+                        ui.label("Not connected to server");
+                    }
                 }
                 Pane::Command => {
                     ui.heading("Command Line");
@@ -129,6 +168,14 @@ impl App for MyApp {
                 Pane::DSPScale => {
                     ui.heading("DSP Scale Adjustment");
 
+                    // Button to request the current DSP scale
+                    if ui.button("Get DSP Scale").clicked() {
+                        self.command.send(RPCCommand::GetFFTScale).unwrap();
+                    }
+
+                    // Display the current DSP scale if available
+                    ui.label(format!("Current DSP Scale: {}", self.settings.fft_scale));
+
                     // Text input for adjusting scale
                     ui.horizontal(|ui| {
                         ui.label("Scale:");
@@ -164,6 +211,123 @@ impl App for MyApp {
                         ui.label(error_message);
                     }
                 }
+                Pane::DACTable => {
+                    ui.heading("DAC Table");
+
+                    // Button to request the current DAC table
+                    if ui.button("Get DAC Table").clicked() {
+                        self.command.send(RPCCommand::GetDACTable).unwrap();
+                    }
+
+                    // Display the current DAC table if available
+                    if let Some(ref dac_table) = self.dac_table {
+                        ui.label(format!("DAC Table: {:?}", &dac_table[..16]));
+                    }
+
+                    // Text input for setting DAC table
+                    ui.horizontal(|ui| {
+                        ui.label("DAC Table Data:");
+                        ui.text_edit_singleline(&mut self.settings.fft_scale); // Use a different field for DAC table input
+                    });
+
+                    // Button to set the DAC table
+                    if ui.button("Set DAC Table").clicked() {
+                        // Parse the user input and set the DAC table
+                        let data: Box<[Complex<i16>; 524288]> = Box::new([Complex::new(0, 0); 524288]); // Replace with actual user input parsing
+                        if let Err(e) = set_dac_table(&self.command, data) {
+                            self.error_message = Some(format!("Failed to set DAC table: {}", e));
+                        } else {
+                            self.error_message = None; // Clear the error message on success
+                        }
+                    }
+
+                    // Display the error message if it exists
+                    if let Some(ref error_message) = self.error_message {
+                        ui.label(error_message);
+                    }
+                }
+                Pane::IFBoard => {
+                    ui.heading("IF Board");
+
+                    // Button to request the current IF frequency
+                    if ui.button("Get IF Frequency").clicked() {
+                        self.command.send(RPCCommand::GetIFFreq).unwrap();
+                    }
+
+                    // Display the current IF frequency if available
+                    if let Some(ref if_freq) = self.if_freq {
+                        ui.label(format!("Current IF Frequency: {}/{}", if_freq.numer(), if_freq.denom()));
+                    }
+
+                    // Text input for setting IF frequency
+                    ui.horizontal(|ui| {
+                        ui.label("IF Frequency:");
+                        ui.text_edit_singleline(&mut self.settings.if_freq);
+                    });
+
+                    // Button to set the IF frequency
+                    if ui.button("Set IF Frequency").clicked() {
+                        // Parse the user input and set the IF frequency
+                        let parts: Vec<&str> = self.settings.if_freq.split('/').collect();
+                        if parts.len() == 2 {
+                            if let (Ok(numer), Ok(denom)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>()) {
+                                let freq = Hertz::new(numer, denom);
+                                if let Err(e) = set_if_freq(&self.command, freq) {
+                                    self.error_message = Some(format!("Failed to set IF frequency: {}", e));
+                                } else {
+                                    self.error_message = None; // Clear the error message on success
+                                }
+                            } else {
+                                self.error_message = Some("Invalid IF frequency. Please enter valid numerator and denominator.".to_string());
+                            }
+                        } else {
+                            self.error_message = Some("Invalid IF frequency format. Please use the format numerator/denominator.".to_string());
+                        }
+                    }
+
+                    // Button to request the current IF attenuations
+                    if ui.button("Get IF Attenuations").clicked() {
+                        self.command.send(RPCCommand::GetIFAttens).unwrap();
+                    }
+
+                    // Display the current IF attenuations if available
+                    if let Some(ref if_attens) = self.if_attens {
+                        ui.label(format!("Current IF Attenuations - Input: {}, Output: {}", if_attens.input, if_attens.output));
+                    }
+
+                    // Text input for setting IF attenuations
+                    ui.horizontal(|ui| {
+                        ui.label("IF Input Attenuation:");
+                        ui.text_edit_singleline(&mut self.settings.if_input_atten);
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("IF Output Attenuation:");
+                        ui.text_edit_singleline(&mut self.settings.if_output_atten);
+                    });
+
+                    // Button to set the IF attenuations
+                    if ui.button("Set IF Attenuations").clicked() {
+                        // Parse the user input and set the IF attenuations
+                        if let (Ok(input), Ok(output)) = (self.settings.if_input_atten.parse::<i32>(), self.settings.if_output_atten.parse::<i32>()) {
+                            let attens = Attens {
+                                input: input as f32,
+                                output: output as f32,
+                            };
+                            if let Err(e) = set_if_attens(&self.command, attens) {
+                                self.error_message = Some(format!("Failed to set IF attenuations: {}", e));
+                            } else {
+                                self.error_message = None; // Clear the error message on success
+                            }
+                        } else {
+                            self.error_message = Some("Invalid IF attenuations. Please enter valid input and output attenuations.".to_string());
+                        }
+                    }
+
+                    // Display the error message if it exists
+                    if let Some(ref error_message) = self.error_message {
+                        ui.label(error_message);
+                    }
+                }
             }
         });
     }
@@ -191,6 +355,28 @@ fn set_scale(tx: &Sender<RPCCommand>, scale: u16) -> Result<(), Box<dyn std::err
     Ok(())
 }
 
+// Function to set the DAC table
+fn set_dac_table(tx: &Sender<RPCCommand>, data: Box<[Complex<i16>; 524288]>) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Setting DAC table");
+    tx.send(RPCCommand::SetDACTable(data))?;
+    Ok(())
+}
+
+// Function to set the IF frequency
+fn set_if_freq(tx: &Sender<RPCCommand>, freq: Hertz) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Setting IF frequency to: {}/{}", freq.numer(), freq.denom());
+    tx.send(RPCCommand::SetIFFreq(freq))?;
+    Ok(())
+}
+
+// Function to set the IF attenuations
+fn set_if_attens(tx: &Sender<RPCCommand>, attens: Attens) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Setting IF attenuations - Input: {}, Output: {}", attens.input, attens.output);
+    tx.send(RPCCommand::SetIFAttens(attens))?;
+    Ok(())
+}
+
+
 // Outputting the gui
 pub fn run_gui(command: Sender<RPCCommand>, response: Receiver<RPCResponse>) {
     let native_options = NativeOptions::default();
@@ -212,7 +398,11 @@ pub fn run_gui(command: Sender<RPCCommand>, response: Receiver<RPCResponse>) {
                 command,
                 response,
                 error_message: None, // Initialize the error message as None
-            })) // Don't remove
+                dac_table: None, // Initialize the DAC table as None
+                if_freq: None, // Initialize the IF frequency as None
+                if_attens: None, // Initialize the IF attenuations as None
+                connection_time: None, // Initialize the connection timestamp as None
+           })) // Don't remove
         }),
     )
     .unwrap_or_else(|e| eprintln!("Failed to run native: {}", e));
