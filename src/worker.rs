@@ -1,13 +1,13 @@
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use futures::AsyncReadExt;
-use gen3_rpc::{client::ExclusiveDroppableReference, Attens, DSPScaleError, Hertz}; // Removed unused imports
+use gen3_rpc::{client::ExclusiveDroppableReference, Attens, DSPScaleError, Hertz};
+use gen3_rpc::DDCChannelConfig;
 use num::Complex;
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
     sync::mpsc::{Receiver, Sender},
     time::{SystemTime, UNIX_EPOCH},
 };
-
 use tokio::runtime::Runtime;
 
 // Define RPC commands for setting and getting the FFT scale, DAC table, and IF board
@@ -62,19 +62,6 @@ pub fn worker_thread(
                 // RPC System initializes communication between us and the board 
                 let mut rpc_system = RpcSystem::new(Box::new(network), None);
 
-                // Initialize the Gen3Board (struct defined in server.rs in gen3_rpc)
-                // Gen3Board includes the following traits : 
-                    // TDAC: DACTable, TIFB: IFBoard, TDSP: DSPScale, TDDC: DDC<TCHAN>, TCHAN: DDCChannel, TCAP: Capture<TSNAP>, TSNAP: Snap
-
-                // Gen3Board includes the following fields
-                    // dac_table: DroppableReferenceImpl<TDAC, crate::gen3rpc_capnp::dac_table::Client>,
-                    // if_board: DroppableReferenceImpl<TIFB, crate::gen3rpc_capnp::if_board::Client>,
-                    // dsp_scale: DroppableReferenceImpl<TDSP, crate::gen3rpc_capnp::dsp_scale::Client>,
-                    // ddc: TDDC,
-                    // capture: TCAP,
-                    // phantom: PhantomData<(TCHAN, TSNAP)>,
-
-
                 let board = gen3_rpc::client::Gen3Board {
                     client: rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server),
                 };
@@ -85,13 +72,11 @@ pub fn worker_thread(
 
                 tokio::task::spawn_local(rpc_system);
 
-                // Get DSP Scale, DAC Table, IF Board from board. 
-                // These are methods implimented as part of the crate::gen3rpc_capnp::gen3_board::Server trait in the Gen3Board struct 
-                // See server.rs in gen3_rpc for more info 
-                // Allow us to extract parameters from the server 
+                // Get DSP Scale, DAC Table, IF Board from board
                 let mut dsp_scale: ExclusiveDroppableReference<_, _> = board.get_dsp_scale().await?.try_into_mut().await?.unwrap_or_else(|_| todo!());
                 let mut dac_table = board.get_dac_table().await?.try_into_mut().await?.unwrap_or_else(|_| todo!());
                 let mut if_board = board.get_if_board().await?.try_into_mut().await?.unwrap_or_else(|_| todo!());
+
                 loop {
                     match command.recv().unwrap() {
                         // Handle the SetFFTScale command
@@ -145,7 +130,7 @@ pub fn worker_thread(
                             match r {
                                 Ok(f) => response.send(RPCResponse::IFFreq(Some(f))).unwrap(),
                                 Err(e) => {
-                                    eprintln!("Failed to set IF frequency: {:?}", e); // Use {:?} for Debug formatting
+                                    eprintln!("Failed to set IF frequency: {:?}", e);
                                     response.send(RPCResponse::IFFreq(None)).unwrap()
                                 },
                             }
@@ -168,7 +153,7 @@ pub fn worker_thread(
                             match r {
                                 Ok(a) => response.send(RPCResponse::IFAttens(Some(a))).unwrap(),
                                 Err(e) => {
-                                    eprintln!("Failed to set IF attenuations: {:?}", e); // Use {:?} for Debug formatting
+                                    eprintln!("Failed to set IF attenuations: {:?}", e);
                                     response.send(RPCResponse::IFAttens(None)).unwrap()
                                 },
                             }
