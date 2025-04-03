@@ -9,6 +9,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::runtime::Runtime;
+use gen3_rpc::utils::client::SweepConfig;
+use gen3_rpc::utils::client::PowerSetting;
+use gen3_rpc::utils::client::Sweep;
+use gen3_rpc::client::Tap;
 
 // Define RPC commands for setting and getting the FFT scale, DAC table, and IF board
 pub enum RPCCommand {
@@ -20,6 +24,7 @@ pub enum RPCCommand {
     SetIFFreq(Hertz),
     GetIFAttens,
     SetIFAttens(Attens),
+    SweepConfig(SweepConfig),
 }
 
 // Define RPC responses for connection status, FFT scale, DAC table, and IF board
@@ -29,6 +34,7 @@ pub enum RPCResponse {
     DACTable(Option<Box<[Complex<i16>; 524288]>>),
     IFFreq(Option<Hertz>),
     IFAttens(Option<Attens>),
+    Sweep(Sweep),
 }
 
 pub fn worker_thread(
@@ -76,7 +82,9 @@ pub fn worker_thread(
                 let mut dsp_scale: ExclusiveDroppableReference<_, _> = board.get_dsp_scale().await?.try_into_mut().await?.unwrap_or_else(|_| todo!());
                 let mut dac_table = board.get_dac_table().await?.try_into_mut().await?.unwrap_or_else(|_| todo!());
                 let mut if_board = board.get_if_board().await?.try_into_mut().await?.unwrap_or_else(|_| todo!());
+                let capture = board.get_capture().await?;
 
+                
                 loop {
                     match command.recv().unwrap() {
                         // Handle the SetFFTScale command
@@ -158,8 +166,13 @@ pub fn worker_thread(
                                 },
                             }
                         }
-                    }
+                        RPCCommand::SweepConfig(config)=>{
+                            println!("Performing Sweep:");
+                            config.sweep(&capture,  Tap::RawIQ,&mut if_board, &mut dsp_scale, &dac_table, None).await.unwrap();
+                        }
+                    }    
                 }
+                
             })
             .await
     })

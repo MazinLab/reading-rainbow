@@ -12,6 +12,7 @@ use num::Complex;
 use std::process::Command; // Importing Command for running shell commands
 use std::sync::mpsc::{Receiver, Sender};
 use gen3_rpc::{Hertz, Attens}; // Importing Hertz and Attens for IF board
+use gen3_rpc::utils::client::{PowerSetting, SweepConfig}; // Corrected imports for PowerSetting and SweepConfig
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 
 // Defining structs
@@ -29,6 +30,10 @@ pub struct MyApp {
     if_freq: Option<Hertz>, // Add a field for the IF frequency
     if_attens: Option<Attens>, // Add a field for the IF attenuations
     connection_time: Option<SystemTime>, // Add a field for the connection timestamp
+    sweep_freqs: String, // Input for sweep frequencies (comma-separated)
+    sweep_settings: String, // Input for power settings (comma-separated)
+    sweep_average: String, // Input for the average value
+    sweep_result: Option<String>, // Field to display the sweep result
 }
 
 // Defining different panes in the gui
@@ -42,6 +47,7 @@ enum Pane {
     DSPScale, // New pane for DSP scale adjustment
     DACTable, // New pane for DAC table operations
     IFBoard, // New pane for IF board operations
+    Sweep, // New pane for SweepConfig
 }
 
 #[derive(Default)]
@@ -78,6 +84,9 @@ impl App for MyApp {
                     self.status.update("Connected");
                     self.connection_time = Some(time);
                 }
+                RPCResponse::Sweep(sweep) => {
+                    self.sweep_result = Some(format!("{:?}", sweep));
+                }
             }
         }
         egui::SidePanel::left("side_panel").show(ctx, |ui| {
@@ -103,6 +112,9 @@ impl App for MyApp {
             }
             if ui.button("IF Board").clicked() {
                 self.current_pane = Pane::IFBoard;
+            }
+            if ui.button("Sweep").clicked() {
+                self.current_pane = Pane::Sweep;
             }
         });
 
@@ -328,6 +340,94 @@ impl App for MyApp {
                         ui.label(error_message);
                     }
                 }
+                Pane::Sweep => {
+                    ui.heading("Sweep Configuration");
+
+                    // Input for sweep frequencies
+                    ui.horizontal(|ui| {
+                        ui.label("Frequencies (comma-separated, e.g., 6000000000/1,6020000000/1):");
+                        ui.text_edit_singleline(&mut self.sweep_freqs);
+                    });
+
+                    // Input for power settings
+                    ui.horizontal(|ui| {
+                        ui.label("Power Settings (comma-separated, e.g., 60/60/4095):");
+                        ui.text_edit_singleline(&mut self.sweep_settings);
+                    });
+
+                    // Input for average value
+                    ui.horizontal(|ui| {
+                        ui.label("Average:");
+                        ui.text_edit_singleline(&mut self.sweep_average);
+                    });
+
+                    // Button to trigger the sweep
+                    if ui.button("Perform Sweep").clicked() {
+                        // Parse the frequencies
+                        let freqs = self
+                            .sweep_freqs
+                            .split(',')
+                            .filter_map(|f| {
+                                let parts: Vec<&str> = f.split('/').collect();
+                                if parts.len() == 2 {
+                                    if let (Ok(numer), Ok(denom)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>()) {
+                                        Some(Hertz::new(numer, denom))
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>();
+
+                        // Parse the power settings
+                        let settings = self
+                            .sweep_settings
+                            .split(',')
+                            .filter_map(|s| {
+                                let parts: Vec<&str> = s.split('/').collect();
+                                if parts.len() == 3 {
+                                    if let (Ok(input), Ok(output), Ok(fft_scale)) =
+                                        (parts[0].parse::<f32>(), parts[1].parse::<f32>(), parts[2].parse::<u16>())
+                                    {
+                                        Some(PowerSetting {
+                                            attens: Attens { input, output },
+                                            fft_scale,
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>();
+
+                        // Parse the average value
+                        if let Ok(average) = self.sweep_average.parse::<u64>() {
+                            // Send the SweepConfig command
+                            let config = SweepConfig {
+                                freqs,
+                                settings,
+                                average,
+                            };
+                            self.command.send(RPCCommand::SweepConfig(config)).unwrap();
+                        } else {
+                            self.error_message = Some("Invalid average value.".to_string());
+                        }
+                    }
+
+                    // Display the sweep result if available
+                    if let Some(ref result) = self.sweep_result {
+                        ui.label(format!("Sweep Result: {}", result));
+                    }
+
+                    // Display the error message if it exists
+                    if let Some(ref error_message) = self.error_message {
+                        ui.label(error_message);
+                    }
+                }
             }
         });
     }
@@ -397,12 +497,16 @@ pub fn run_gui(command: Sender<RPCCommand>, response: Receiver<RPCResponse>) {
                 settings: Settings::default(),
                 command,
                 response,
-                error_message: None, // Initialize the error message as None
-                dac_table: None, // Initialize the DAC table as None
-                if_freq: None, // Initialize the IF frequency as None
-                if_attens: None, // Initialize the IF attenuations as None
-                connection_time: None, // Initialize the connection timestamp as None
-           })) // Don't remove
+                error_message: None,
+                dac_table: None,
+                if_freq: None,
+                if_attens: None,
+                connection_time: None,
+                sweep_freqs: String::new(),
+                sweep_settings: String::new(),
+                sweep_average: String::new(),
+                sweep_result: None,
+            }))
         }),
     )
     .unwrap_or_else(|e| eprintln!("Failed to run native: {}", e));
