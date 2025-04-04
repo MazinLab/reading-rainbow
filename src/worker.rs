@@ -1,16 +1,16 @@
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use futures::AsyncReadExt;
 use gen3_rpc::{client::ExclusiveDroppableReference, Attens, DSPScaleError, Hertz};
-use gen3_rpc::DDCChannelConfig;
+//use gen3_rpc::DDCChannelConfig;
 use num::Complex;
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
     sync::mpsc::{Receiver, Sender},
-    time::{SystemTime, UNIX_EPOCH},
+    time::SystemTime,
 };
 use tokio::runtime::Runtime;
 use gen3_rpc::utils::client::SweepConfig;
-use gen3_rpc::utils::client::PowerSetting;
+//use gen3_rpc::utils::client::PowerSetting;
 use gen3_rpc::utils::client::Sweep;
 use gen3_rpc::client::Tap;
 
@@ -84,7 +84,7 @@ pub fn worker_thread(
                 let mut if_board = board.get_if_board().await?.try_into_mut().await?.unwrap_or_else(|_| todo!());
                 let capture = board.get_capture().await?;
 
-                
+
                 loop {
                     match command.recv().unwrap() {
                         // Handle the SetFFTScale command
