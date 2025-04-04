@@ -9,11 +9,11 @@ use crate::status::Status;
 use crate::worker::{RPCCommand, RPCResponse};
 use eframe::{egui, App, CreationContext, NativeOptions};
 use num::Complex;
-use std::process::Command; // Importing Command for running shell commands
+use std::process::Command; 
 use std::sync::mpsc::{Receiver, Sender};
-use gen3_rpc::{Hertz, Attens}; // Importing Hertz and Attens for IF board
-use gen3_rpc::utils::client::{PowerSetting, SweepConfig}; // Corrected imports for PowerSetting and SweepConfig
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use gen3_rpc::{Hertz, Attens}; 
+use gen3_rpc::utils::client::{PowerSetting, SweepConfig}; 
+use std::time::{SystemTime, Duration};
 
 // Defining structs
 pub struct MyApp {
@@ -46,13 +46,13 @@ pub struct MyApp {
 enum Pane {
     #[default]
     Settings,
-    Command, // New pane for command line
+    Command, 
     DataLogging,
     Status,
-    DSPScale, // New pane for DSP scale adjustment
-    DACTable, // New pane for DAC table operations
-    IFBoard, // New pane for IF board operations
-    Sweep, // New pane for SweepConfig
+    DSPScale, 
+    DACTable, 
+    IFBoard, 
+    Sweep, 
 }
 
 #[derive(Default)]
@@ -144,7 +144,7 @@ impl App for MyApp {
                 Pane::Command => {
                     ui.heading("Command Line");
 
-                    // Text input for command
+                    // Input command line text
                     ui.horizontal(|ui| {
                         ui.label("Command:");
                         ui.text_edit_singleline(&mut self.command_input);
@@ -153,7 +153,7 @@ impl App for MyApp {
                         }
                     });
 
-                    // Display command output
+                    // Show command line output
                     ui.label("Output:");
                     ui.add(
                         egui::TextEdit::multiline(&mut self.command_output)
@@ -161,6 +161,7 @@ impl App for MyApp {
                             .desired_rows(10), // Number of output rows (can adjust)
                     );
                 }
+                // Log Data (non-fully functional) 
                 Pane::DataLogging => {
                     ui.heading("Data Logging");
 
@@ -221,12 +222,12 @@ impl App for MyApp {
                                 self.error_message = Some("Invalid scale value. Please enter one of the valid values.".to_string());
                             }
                         } else {
-                            // Display an error message if the value is not a valid number
+                            // Error if input is not a valid number
                             self.error_message = Some("Invalid scale value. Please enter one of the valid values.".to_string());
                         }
                     }
 
-                    // Display the error message if it exists
+                    // Display possible error
                     if let Some(ref error_message) = self.error_message {
                         ui.label(error_message);
                     }
@@ -239,7 +240,8 @@ impl App for MyApp {
                         self.command.send(RPCCommand::GetDACTable).unwrap();
                     }
 
-                    // Display the current DAC table if available
+                    // Display the current DAC table if available (non-fully functional)
+                    // Possible memory issue with large table of complex values 
                     if let Some(ref dac_table) = self.dac_table {
                         ui.label(format!("DAC Table: {:?}", &dac_table[..16]));
                     }
@@ -287,7 +289,7 @@ impl App for MyApp {
 
                     // Button to set the IF frequency
                     if ui.button("Set IF Frequency").clicked() {
-                        // Parse the user input and set the IF frequency
+                        // Parse user input and set the IF frequency
                         let parts: Vec<&str> = self.settings.if_freq.split('/').collect();
                         if parts.len() == 2 {
                             if let (Ok(numer), Ok(denom)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>()) {
@@ -364,11 +366,13 @@ impl App for MyApp {
 
                     // Handle manual input or fetching frequency from the board
                     if self.settings.if_freq_mode == "Manual" {
+                        // Show input line for manual frequency entry
                         ui.horizontal(|ui| {
-                            ui.label("Start Frequency (ex, 6000000000):");
+                            ui.label("Start Frequency (e.g., 6000000000):");
                             ui.text_edit_singleline(&mut self.sweep_start_freq);
                         });
                     } else if self.settings.if_freq_mode == "Board" {
+                        // Show button to fetch frequency from the board
                         if ui.button("Get Frequency from Board").clicked() {
                             self.command.send(RPCCommand::GetIFFreq).unwrap();
                         }
@@ -381,52 +385,55 @@ impl App for MyApp {
                         }
                     }
 
-                    // Input for stopping frequency
-                    ui.horizontal(|ui| {
-                        ui.label("Stopping Frequency (ex, 6020000000):");
-                        ui.text_edit_singleline(&mut self.sweep_stop_freq);
-                    });
+                    // Show stopping frequency, number of counts, and generate frequency list only after Manual or Board is selected
+                    if self.settings.if_freq_mode == "Manual" || self.settings.if_freq_mode == "Board" {
+                        // Input for stopping frequency
+                        ui.horizontal(|ui| {
+                            ui.label("Stopping Frequency (e.g., 6020000000):");
+                            ui.text_edit_singleline(&mut self.sweep_stop_freq);
+                        });
 
-                    // Input for count
-                    ui.horizontal(|ui| {
-                        ui.label("Number of Frequency Values:");
-                        ui.text_edit_singleline(&mut self.sweep_count);
-                    });
+                        // Input for count
+                        ui.horizontal(|ui| {
+                            ui.label("Number of Frequency Values:");
+                            ui.text_edit_singleline(&mut self.sweep_count);
+                        });
 
-                    // Button to generate frequencies
-                    if ui.button("Generate Frequency List").clicked() {
-                        let start_freq = if self.settings.if_freq_mode == "Manual" {
-                            self.sweep_start_freq.parse::<i64>().ok()
-                        } else {
-                            self.if_freq.as_ref().map(|f| f.numer()).cloned()
-                        };
-
-                        if let (Some(start), Ok(stop), Ok(count)) = (
-                            start_freq,
-                            self.sweep_stop_freq.parse::<i64>(),
-                            self.sweep_count.parse::<usize>(),
-                        ) {
-                            if count > 1 && start < stop {
-                                self.sweep_freqs = (0..count)
-                                    .map(|i| {
-                                        let freq = start + i as i64 * (stop - start) / (count as i64 - 1);
-                                        Hertz::new(freq, 1)
-                                    })
-                                    .collect();
-                                self.error_message = None; // Clear any previous error messages
+                        // Button to generate frequencies
+                        if ui.button("Generate Frequency List").clicked() {
+                            let start_freq = if self.settings.if_freq_mode == "Manual" {
+                                self.sweep_start_freq.parse::<i64>().ok()
                             } else {
-                                self.error_message = Some("Invalid input: Count must be > 1 and initial frequency < stopping frequency.".to_string());
-                            }
-                        } else {
-                            self.error_message = Some("Invalid input: Enter valid numbers for initial/stopping frequency and count.".to_string());
-                        }
-                    }
+                                self.if_freq.as_ref().map(|f| f.numer()).cloned()
+                            };
 
-                    // Display the generated frequencies
-                    if !self.sweep_freqs.is_empty() {
-                        ui.label("Generated Frequency List:");
-                        for freq in &self.sweep_freqs {
-                            ui.label(format!("{}/{}", freq.numer(), freq.denom()));
+                            if let (Some(start), Ok(stop), Ok(count)) = (
+                                start_freq,
+                                self.sweep_stop_freq.parse::<i64>(),
+                                self.sweep_count.parse::<usize>(),
+                            ) {
+                                if count > 1 && start < stop {
+                                    self.sweep_freqs = (0..count)
+                                        .map(|i| {
+                                            let freq = start + i as i64 * (stop - start) / (count as i64 - 1);
+                                            Hertz::new(freq, 1)
+                                        })
+                                        .collect();
+                                    self.error_message = None; // Clear any previous error messages
+                                } else {
+                                    self.error_message = Some("Invalid input: Count must be > 1 and initial frequency < stopping frequency.".to_string());
+                                }
+                            } else {
+                                self.error_message = Some("Invalid input: Enter valid numbers for initial/stopping frequency and count.".to_string());
+                            }
+                        }
+
+                        // Display the generated frequencies
+                        if !self.sweep_freqs.is_empty() {
+                            ui.label("Generated Frequency List:");
+                            for freq in &self.sweep_freqs {
+                                ui.label(format!("{}/{}", freq.numer(), freq.denom()));
+                            }
                         }
                     }
 
