@@ -353,208 +353,211 @@ impl App for MyApp {
                 Pane::Sweep => {
                     ui.heading("Sweep Configuration");
 
-                    // Option to choose between manual input or fetching frequency from the board
-                    ui.horizontal(|ui| {
-                        ui.label("Initial Frequency:");
-                        if ui.radio_value(&mut self.settings.if_freq_mode, "Manual".to_string(), "Manual").clicked() {
-                            self.settings.if_freq_mode = "Manual".to_string();
-                        }
-                        if ui.radio_value(&mut self.settings.if_freq_mode, "Board".to_string(), "Board").clicked() {
-                            self.settings.if_freq_mode = "Board".to_string();
-                        }
-                    });
+                    // Frequency Settings
+                    ui.group(|ui| {
+                        ui.heading("Frequency Settings");
 
-                    // Handle manual input or fetching frequency from the board
-                    if self.settings.if_freq_mode == "Manual" {
-                        // Show input line for manual frequency entry
+                        // Option to choose between manual input or fetching frequency from the board
                         ui.horizontal(|ui| {
-                            ui.label("Start Frequency (e.g., 6000000000):");
-                            ui.text_edit_singleline(&mut self.sweep_start_freq);
-                        });
-                    } else if self.settings.if_freq_mode == "Board" {
-                        // Show button to fetch frequency from the board
-                        if ui.button("Get Frequency from Board").clicked() {
-                            self.command.send(RPCCommand::GetIFFreq).unwrap();
-                        }
-
-                        // Display the current frequency if available
-                        if let Some(ref if_freq) = self.if_freq {
-                            ui.label(format!("Initial Frequency (from board): {}/{}", if_freq.numer(), if_freq.denom()));
-                        } else {
-                            ui.label("Initial Frequency not available.");
-                        }
-                    }
-
-                    // Show stopping frequency, number of counts, and generate frequency list only after Manual or Board is selected
-                    if self.settings.if_freq_mode == "Manual" || self.settings.if_freq_mode == "Board" {
-                        // Input for stopping frequency
-                        ui.horizontal(|ui| {
-                            ui.label("Stopping Frequency (e.g., 6020000000):");
-                            ui.text_edit_singleline(&mut self.sweep_stop_freq);
+                            ui.label("Initial Frequency:");
+                            if ui.radio_value(&mut self.settings.if_freq_mode, "Manual".to_string(), "Manual").clicked() {
+                                self.settings.if_freq_mode = "Manual".to_string();
+                            }
+                            if ui.radio_value(&mut self.settings.if_freq_mode, "Board".to_string(), "Board").clicked() {
+                                self.settings.if_freq_mode = "Board".to_string();
+                            }
                         });
 
-                        // Input for count
-                        ui.horizontal(|ui| {
-                            ui.label("Number of Frequency Values:");
-                            ui.text_edit_singleline(&mut self.sweep_count);
-                        });
+                        // Handle manual input or fetching frequency from the board
+                        if self.settings.if_freq_mode == "Manual" {
+                            ui.horizontal(|ui| {
+                                ui.label("Start Frequency (e.g., 6000000000):");
+                                ui.text_edit_singleline(&mut self.sweep_start_freq);
+                            });
+                        } else if self.settings.if_freq_mode == "Board" {
+                            if ui.button("Get Frequency from Board").clicked() {
+                                self.command.send(RPCCommand::GetIFFreq).unwrap();
+                            }
 
-                        // Button to generate frequencies
-                        if ui.button("Generate Frequency List").clicked() {
-                            let start_freq = if self.settings.if_freq_mode == "Manual" {
-                                self.sweep_start_freq.parse::<i64>().ok()
+                            if let Some(ref if_freq) = self.if_freq {
+                                ui.label(format!("Initial Frequency (from board): {}/{}", if_freq.numer(), if_freq.denom()));
                             } else {
-                                self.if_freq.as_ref().map(|f| f.numer()).cloned()
-                            };
+                                ui.label("Initial Frequency not available.");
+                            }
+                        }
 
-                            if let (Some(start), Ok(stop), Ok(count)) = (
-                                start_freq,
-                                self.sweep_stop_freq.parse::<i64>(),
-                                self.sweep_count.parse::<usize>(),
-                            ) {
-                                if count > 1 && start < stop {
-                                    self.sweep_freqs = (0..count)
-                                        .map(|i| {
-                                            let freq = start + i as i64 * (stop - start) / (count as i64 - 1);
-                                            Hertz::new(freq, 1)
-                                        })
-                                        .collect();
-                                    self.error_message = None; // Clear any previous error messages
+                        // Show stopping frequency and number of counts
+                        if self.settings.if_freq_mode == "Manual" || self.settings.if_freq_mode == "Board" {
+                            ui.horizontal(|ui| {
+                                ui.label("Stopping Frequency (e.g., 6020000000):");
+                                ui.text_edit_singleline(&mut self.sweep_stop_freq);
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Number of Frequency Values:");
+                                ui.text_edit_singleline(&mut self.sweep_count);
+                            });
+
+                            // Button to generate frequencies
+                            if ui.button("Generate Frequency List").clicked() {
+                                let start_freq = if self.settings.if_freq_mode == "Manual" {
+                                    self.sweep_start_freq.parse::<i64>().ok()
                                 } else {
-                                    self.error_message = Some("Invalid input: Count must be > 1 and initial frequency < stopping frequency.".to_string());
+                                    self.if_freq.as_ref().map(|f| f.numer()).cloned()
+                                };
+
+                                if let (Some(start), Ok(stop), Ok(count)) = (
+                                    start_freq,
+                                    self.sweep_stop_freq.parse::<i64>(),
+                                    self.sweep_count.parse::<usize>(),
+                                ) {
+                                    if count > 1 && start < stop {
+                                        self.sweep_freqs = (0..count)
+                                            .map(|i| {
+                                                let freq = start + i as i64 * (stop - start) / (count as i64 - 1);
+                                                Hertz::new(freq, 1)
+                                            })
+                                            .collect();
+                                        self.error_message = None; // Clear any previous error messages
+                                    } else {
+                                        self.error_message = Some("Invalid input: Count must be > 1 and initial frequency < stopping frequency.".to_string());
+                                    }
+                                } else {
+                                    self.error_message = Some("Invalid input: Enter valid numbers for initial/stopping frequency and count.".to_string());
                                 }
+                            }
+
+                            // Display the generated frequencies
+                            if !self.sweep_freqs.is_empty() {
+                                ui.label("Generated Frequency List:");
+                                for freq in &self.sweep_freqs {
+                                    ui.label(format!("{}/{}", freq.numer(), freq.denom()));
+                                }
+                            }
+                        }
+                    });
+
+                    // Power Settings
+                    ui.group(|ui| {
+                        ui.heading("Power Settings");
+
+                        // Option to choose between manual input or fetching attenuations from the board
+                        ui.horizontal(|ui| {
+                            ui.label("Attenuations:");
+                            if ui.radio_value(&mut self.settings.if_atten_mode, "Manual".to_string(), "Manual").clicked() {
+                                self.settings.if_atten_mode = "Manual".to_string();
+                            }
+                            if ui.radio_value(&mut self.settings.if_atten_mode, "Board".to_string(), "Board").clicked() {
+                                self.settings.if_atten_mode = "Board".to_string();
+                            }
+                        });
+
+                        // Handle manual input or fetching attenuations from the board
+                        if self.settings.if_atten_mode == "Manual" {
+                            ui.horizontal(|ui| {
+                                ui.label("Input Attenuation:");
+                                ui.text_edit_singleline(&mut self.sweep_input_atten);
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Output Attenuation:");
+                                ui.text_edit_singleline(&mut self.sweep_output_atten);
+                            });
+                        } else if self.settings.if_atten_mode == "Board" {
+                            if ui.button("Get IF Attenuations from Board").clicked() {
+                                self.command.send(RPCCommand::GetIFAttens).unwrap();
+                            }
+
+                            if let Some(ref if_attens) = self.if_attens {
+                                ui.label(format!(
+                                    "Current IF Attenuations - Input: {}, Output: {}",
+                                    if_attens.input, if_attens.output
+                                ));
                             } else {
-                                self.error_message = Some("Invalid input: Enter valid numbers for initial/stopping frequency and count.".to_string());
+                                ui.label("Attenuation not available.");
                             }
                         }
 
-                        // Display the generated frequencies
-                        if !self.sweep_freqs.is_empty() {
-                            ui.label("Generated Frequency List:");
-                            for freq in &self.sweep_freqs {
-                                ui.label(format!("{}/{}", freq.numer(), freq.denom()));
+                        // Input for DSP scale
+                        ui.horizontal(|ui| {
+                            ui.label("DSP Scale:");
+                            if ui.radio_value(&mut self.settings.dsp_scale_mode, "Manual".to_string(), "Manual").clicked() {
+                                self.settings.dsp_scale_mode = "Manual".to_string();
                             }
-                        }
-                    }
+                            if ui.radio_value(&mut self.settings.dsp_scale_mode, "Board".to_string(), "Board").clicked() {
+                                self.settings.dsp_scale_mode = "Board".to_string();
+                            }
+                        });
 
-                    // Option to choose between manual input or fetching attenuations from the board
-                    ui.horizontal(|ui| {
-                        ui.label("Attenuations:");
-                        if ui.radio_value(&mut self.settings.if_atten_mode, "Manual".to_string(), "Manual").clicked() {
-                            self.settings.if_atten_mode = "Manual".to_string();
-                        }
-                        if ui.radio_value(&mut self.settings.if_atten_mode, "Board".to_string(), "Board").clicked() {
-                            self.settings.if_atten_mode = "Board".to_string();
+                        if self.settings.dsp_scale_mode == "Manual" {
+                            ui.horizontal(|ui| {
+                                ui.label("Enter DSP Scale:");
+                                ui.text_edit_singleline(&mut self.sweep_dsp_scale);
+                            });
+                        } else if self.settings.dsp_scale_mode == "Board" {
+                            if ui.button("Get DSP Scale from Board").clicked() {
+                                self.command.send(RPCCommand::GetFFTScale).unwrap();
+                            }
+
+                            ui.label(format!("Current DSP Scale: {}", self.settings.fft_scale));
                         }
                     });
 
-                    // Handle manual input or fetching attenuations from the board
-                    if self.settings.if_atten_mode == "Manual" {
-                        // Text input for input attenuation
+                    // Time Average
+                    ui.group(|ui| {
+                        ui.heading("Time Average");
+
                         ui.horizontal(|ui| {
-                            ui.label("Input Attenuation:");
-                            ui.text_edit_singleline(&mut self.sweep_input_atten);
+                            ui.label("Average:");
+                            ui.text_edit_singleline(&mut self.sweep_average);
                         });
 
-                        // Text input for output attenuation
-                        ui.horizontal(|ui| {
-                            ui.label("Output Attenuation:");
-                            ui.text_edit_singleline(&mut self.sweep_output_atten);
-                        });
-                    } else if self.settings.if_atten_mode == "Board" {
-                        // Button to request the current IF attenuations
-                        if ui.button("Get IF Attenuations from Board").clicked() {
-                            self.command.send(RPCCommand::GetIFAttens).unwrap();
-                        }
-
-                        // Display the current IF attenuations if available
-                        if let Some(ref if_attens) = self.if_attens {
-                            ui.label(format!(
-                                "Current IF Attenuations - Input: {}, Output: {}",
-                                if_attens.input, if_attens.output
-                            ));
-                        } else {
-                            ui.label("Attenuation not available.");
-                        }
-                    }
-
-                    // Input for DSP scale
-                    ui.horizontal(|ui| {
-                        ui.label("DSP Scale:");
-                        if ui.radio_value(&mut self.settings.dsp_scale_mode, "Manual".to_string(), "Manual").clicked() {
-                            self.settings.dsp_scale_mode = "Manual".to_string();
-                        }
-                        if ui.radio_value(&mut self.settings.dsp_scale_mode, "Board".to_string(), "Board").clicked() {
-                            self.settings.dsp_scale_mode = "Board".to_string();
-                        }
-                    });
-
-                    // Handle manual input or fetching DSP scale from the board
-                    if self.settings.dsp_scale_mode == "Manual" {
-                        ui.horizontal(|ui| {
-                            ui.label("Enter DSP Scale:");
-                            ui.text_edit_singleline(&mut self.sweep_dsp_scale);
-                        });
-                    } else if self.settings.dsp_scale_mode == "Board" {
-                        if ui.button("Get DSP Scale from Board").clicked() {
-                            self.command.send(RPCCommand::GetFFTScale).unwrap();
-                        }
-
-                        // Display the current DSP scale if available
-                        ui.label(format!("Current DSP Scale: {}", self.settings.fft_scale));
-                    }
-
-                    // Input for average value
-                    ui.horizontal(|ui| {
-                        ui.label("Average:");
-                        ui.text_edit_singleline(&mut self.sweep_average);
-                    });
-
-                    // Button to perform the sweep
-                    if ui.button("Perform Sweep").clicked() {
-                        let dsp_scale = if self.settings.dsp_scale_mode == "Manual" {
-                            self.sweep_dsp_scale.parse::<u16>().ok()
-                        } else {
-                            self.settings.fft_scale.parse::<u16>().ok()
-                        };
-
-                        let input_atten = if self.settings.if_atten_mode == "Manual" {
-                            self.sweep_input_atten.parse::<f32>().ok()
-                        } else {
-                            self.if_attens.as_ref().map(|a| a.input)
-                        };
-
-                        let output_atten = if self.settings.if_atten_mode == "Manual" {
-                            self.sweep_output_atten.parse::<f32>().ok()
-                        } else {
-                            self.if_attens.as_ref().map(|a| a.output)
-                        };
-
-                        if let (Some(input_atten), Some(output_atten), Ok(average), Some(fft_scale)) = (
-                            input_atten,
-                            output_atten,
-                            self.sweep_average.parse::<u64>(),
-                            dsp_scale,
-                        ) {
-                            let settings = vec![PowerSetting {
-                                attens: Attens {
-                                    input: input_atten,
-                                    output: output_atten,
-                                },
-                                fft_scale,
-                            }];
-
-                            let config = SweepConfig {
-                                freqs: self.sweep_freqs.clone(), // Use the generated frequency list
-                                settings,
-                                average,
+                        // Button to perform the sweep
+                        if ui.button("Perform Sweep").clicked() {
+                            let dsp_scale = if self.settings.dsp_scale_mode == "Manual" {
+                                self.sweep_dsp_scale.parse::<u16>().ok()
+                            } else {
+                                self.settings.fft_scale.parse::<u16>().ok()
                             };
 
-                            self.command.send(RPCCommand::SweepConfig(config)).unwrap();
-                        } else {
-                            self.error_message = Some("Invalid input values.".to_string());
+                            let input_atten = if self.settings.if_atten_mode == "Manual" {
+                                self.sweep_input_atten.parse::<f32>().ok()
+                            } else {
+                                self.if_attens.as_ref().map(|a| a.input)
+                            };
+
+                            let output_atten = if self.settings.if_atten_mode == "Manual" {
+                                self.sweep_output_atten.parse::<f32>().ok()
+                            } else {
+                                self.if_attens.as_ref().map(|a| a.output)
+                            };
+
+                            if let (Some(input_atten), Some(output_atten), Ok(average), Some(fft_scale)) = (
+                                input_atten,
+                                output_atten,
+                                self.sweep_average.parse::<u64>(),
+                                dsp_scale,
+                            ) {
+                                let settings = vec![PowerSetting {
+                                    attens: Attens {
+                                        input: input_atten,
+                                        output: output_atten,
+                                    },
+                                    fft_scale,
+                                }];
+
+                                let config = SweepConfig {
+                                    freqs: self.sweep_freqs.clone(),
+                                    settings,
+                                    average,
+                                };
+
+                                self.command.send(RPCCommand::SweepConfig(config)).unwrap();
+                            } else {
+                                self.error_message = Some("Invalid input values.".to_string());
+                            }
                         }
-                    }
+                    });
 
                     // Display the error message if it exists
                     if let Some(ref error_message) = self.error_message {
