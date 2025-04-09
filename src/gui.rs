@@ -71,6 +71,14 @@ impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Ok(c) = self.response.try_recv() {
             match c {
+                // Handle the CaptureResult response
+                RPCResponse::CaptureResult(data) => {
+                    if data.is_empty() {
+                        self.error_message = Some("Capture failed: No data available.".to_string());
+                    } else {
+                        self.sweep_result = Some(format!("Captured Data: {:?}", data));
+                    }
+                }
                 // Update the FFT scale in the settings
                 RPCResponse::FFTScale(i) => {
                     self.settings.fft_scale = i.map_or_else(|| "0".to_string(), |v| v.to_string());
@@ -97,6 +105,7 @@ impl App for MyApp {
                 }
             }
         }
+
         egui::SidePanel::left("side_panel").show(ctx, |ui| {
             ui.heading("Menu");
 
@@ -557,11 +566,22 @@ impl App for MyApp {
                                 self.error_message = Some("Invalid input values.".to_string());
                             }
                         }
+
+                        // Button to perform a capture 
+                        // Non-functional (yields error)
+                        if ui.button("Capture").clicked() {
+                            self.command.send(RPCCommand::PerformCapture).unwrap();
+                        }
                     });
 
-                    // Display the error message if it exists
+                    // Display error message
                     if let Some(ref error_message) = self.error_message {
                         ui.label(error_message);
+                    }
+
+                    // Display the sweep result
+                    if let Some(ref sweep_result) = self.sweep_result {
+                        ui.label(sweep_result);
                     }
                 }
             }

@@ -1,7 +1,6 @@
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use futures::AsyncReadExt;
 use gen3_rpc::{client::ExclusiveDroppableReference, Attens, DSPScaleError, Hertz};
-//use gen3_rpc::DDCChannelConfig;
 use num::Complex;
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
@@ -10,9 +9,8 @@ use std::{
 };
 use tokio::runtime::Runtime;
 use gen3_rpc::utils::client::SweepConfig;
-//use gen3_rpc::utils::client::PowerSetting;
+use gen3_rpc::client::{CaptureTap, Tap};
 use gen3_rpc::utils::client::Sweep;
-use gen3_rpc::client::Tap;
 
 // Define RPC commands for setting and getting the FFT scale, DAC table, and IF board
 pub enum RPCCommand {
@@ -25,6 +23,7 @@ pub enum RPCCommand {
     GetIFAttens,
     SetIFAttens(Attens),
     SweepConfig(SweepConfig),
+    PerformCapture, // New command to perform a capture
 }
 
 // Define RPC responses for connection status, FFT scale, DAC table, and IF board
@@ -35,6 +34,7 @@ pub enum RPCResponse {
     IFFreq(Option<Hertz>),
     IFAttens(Option<Attens>),
     Sweep(Sweep),
+    CaptureResult(Vec<Complex<i16>>), // New response to send capture results
 }
 
 pub fn worker_thread(
@@ -84,6 +84,7 @@ pub fn worker_thread(
                 let mut if_board = board.get_if_board().await?.try_into_mut().await?.unwrap_or_else(|_| todo!());
                 let capture = board.get_capture().await?;
 
+                let mut operation_in_progress = false;
 
                 loop {
                     match command.recv().unwrap() {
@@ -166,9 +167,84 @@ pub fn worker_thread(
                                 },
                             }
                         }
-                        RPCCommand::SweepConfig(config)=>{
+                        // Handle the PerformCapture command
+                        RPCCommand::PerformCapture => {
+                            if operation_in_progress {
+                                eprintln!("Capture skipped: Another operation is in progress."); // Prevent capture overlap
+                                response
+                                    .send(RPCResponse::CaptureResult(vec![]))
+                                    .unwrap_or_else(|err| eprintln!("Failed to send error response: {:?}", err));
+                                continue;
+                            }
+
+                            operation_in_progress = true; // Remove in future versions
+                            println!("Performing Capture:");
+
+                            // Perform the capture
+                            let rfchain = gen3_rpc::client::RFChain {
+                                dac_table: &dac_table,
+                                if_board: &if_board,
+                                dsp_scale: &dsp_scale,
+                            };
+
+                            let tap = gen3_rpc::client::CaptureTap::new(&rfchain, gen3_rpc::client::Tap::RawIQ);
+
+                            let result = capture.capture(tap, 1).await;
+
+                            match result {
+                                Ok(snap) => {
+                                    match snap {
+                                        gen3_rpc::Snap::Raw(data) => {
+                                            println!("Capture successful");
+                                            response.send(RPCResponse::CaptureResult(data)).unwrap();
+                                        }
+                                        _ => {
+                                            eprintln!("Unexpected Snap type: {:?}", snap); // Account for improper capture input
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Capture failed: {:?}", e); // Error to prevent gui from crashing 
+                                    response
+                                        .send(RPCResponse::CaptureResult(vec![]))
+                                        .unwrap_or_else(|err| eprintln!("Failed to send error response: {:?}", err)); // Error to prevent gui panic
+                                }
+                            }
+
+                            operation_in_progress = false;
+                        }
+                        // Handle the SweepConfig command
+                        RPCCommand::SweepConfig(config) => {
+                            if operation_in_progress {
+                                eprintln!("Sweep skipped: Another operation is in progress."); // Prevent sweep overlap 
+                                continue;
+                            }
+
+                            operation_in_progress = true;
                             println!("Performing Sweep:");
-                            config.sweep(&capture,  Tap::RawIQ,&mut if_board, &mut dsp_scale, &dac_table, None).await.unwrap();
+
+                            let result = config
+                                .sweep(
+                                    &capture,
+                                    Tap::RawIQ,
+                                    &mut if_board,
+                                    &mut dsp_scale,
+                                    &dac_table,
+                                    None,
+                                )
+                                .await;
+
+                            match result {
+                                Ok(sweep) => {
+                                    println!("Sweep successful");
+                                    response.send(RPCResponse::Sweep(sweep)).unwrap();
+                                }
+                                Err(e) => {
+                                    eprintln!("Sweep failed: {:?}", e);
+                                }
+                            }
+
+                            operation_in_progress = false;
                         }
                     }    
                 }
